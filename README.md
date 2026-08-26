@@ -106,18 +106,98 @@ The server binds to `0.0.0.0:3000` and prints the active LAN IP in the console b
 
 ---
 
-## 📱 How to Connect from LAN / Wi-Fi Devices
+## 💬 How to Connect & Chat (User Guide)
 
-1. Ensure the host computer and mobile devices are connected to the **same Wi-Fi network**.
-2. Find the host computer's LAN IPv4 address:
-   - **Windows**: Run `ipconfig` in Command Prompt / PowerShell (Look for `IPv4 Address`, e.g. `192.168.1.100`).
-   - **Linux**: Run `ip addr` or `hostname -I`.
-   - **macOS**: Run `ifconfig` or check **System Settings > Wi-Fi > Details**.
-3. Open the browser on your phone/tablet and navigate to:
-   ```text
-   http://192.168.1.100:3000
-   ```
-4. Or simply scan the **QR Code** generated directly on the web app's join screen or sidebar!
+Follow these simple steps to start chatting privately across your local network:
+
+```
+[ Step 1: Wi-Fi ]       [ Step 2: Open URL ]       [ Step 3: Pick Name ]       [ Step 4: Chat ]
+Connect all devices  ->  Scan QR or visit       ->  Enter temporary      ->  Select online peer
+to the same router       http://<HOST-IP>:3000      nickname (e.g. Rafi)     & start messaging!
+```
+
+### Step 1: Connect to the Same Wi-Fi / Local Network
+Make sure the host machine running the server and any client devices (smartphones, tablets, other laptops) are connected to the **same Wi-Fi router or mobile hotspot**.
+
+### Step 2: Open the Chat Web App
+- **From Host PC**: Open `http://localhost:3000` in your browser.
+- **From Other Devices (Phone/Tablet/Laptop)**:
+  - Open `http://<HOST-LAN-IP>:3000` (e.g. `http://192.168.1.100:3000`).
+  - **Or simply scan the QR code**: Click the **LAN QR Code** icon on the top right of the screen or sidebar to scan with your phone camera.
+
+### Step 3: Choose a Temporary Nickname
+- Type a nickname (2–30 characters, letters, numbers, spaces, or hyphens).
+- Click **Join Chat**.
+- If someone else is already using that nickname on the local network, you will be prompted to pick a different one.
+
+### Step 4: Select an Online Peer
+- Once inside, the left sidebar automatically lists all **Online Users** currently on your local network with green presence dots.
+- Tap or click on any peer's name to open a private 1-to-1 conversation window.
+
+### Step 5: Start Real-Time Messaging
+- Type your message in the input box at the bottom and hit **Enter** or tap **Send**.
+- **Real-Time Typing**: As you type, the other user sees an animated typing indicator.
+- **Read Receipts**: 
+  - `✓` (Single tick): Message delivered to the server and recipient.
+  - `✓✓` (Double tick): Message viewed by the recipient.
+- **Message History**: The last 50 messages load instantly. Scroll up to smoothly paginate through up to the last 1,000 messages.
+- **Switch Conversations**: Click any other peer in the sidebar anytime to switch chats.
+
+---
+
+## 🧠 System Behavior & Lifecycle (Before, During & After)
+
+Here is a breakdown of how the application behaves behind the scenes across the full communication lifecycle:
+
+```
++-----------------------------------------------------------------------------------+
+| 1. BEFORE JOINING (Pre-Chat)                                                      |
+|   • Zero database records, zero signup/passwords, zero email verification.        |
+|   • Client requests nickname -> Redis validates case-insensitive uniqueness.      |
+|   • Session key registered in Redis: `user:{nickname}` with 60s TTL.             |
++-----------------------------------------------------------------------------------+
+                                      │
+                                      ▼
++-----------------------------------------------------------------------------------+
+| 2. DURING CHAT (Active Real-Time State)                                           |
+|   • WebSocket Transport: Socket.IO maintains low-latency bi-directional stream.   |
+|   • Heartbeat Loop: Client sends heartbeat ping every 20s; resets 60s TTL.        |
+|   • Deterministic Channels: Key format `chat:{min_user}:{max_user}` for 1-to-1.  |
+|   • Strict Capped Buffer: Redis `LPUSH` + `LTRIM 0 999` limits max 1,000 msgs.   |
+|   • Inactivity Expiration: Thread TTL resets to 24 hours on every message sent.  |
+|   • Rate Limiting: Sliding window rate limits rapid message flooding or spam.    |
+|   • Typing & Read Status: Ephemeral socket events sync typing status & read ticks.|
++-----------------------------------------------------------------------------------+
+                                      │
+                                      ▼
++-----------------------------------------------------------------------------------+
+| 3. AFTER CHAT / DISCONNECTION (Self-Destruction & Zero Persistence)               |
+|   • Immediate Close: Disconnect event removes user socket mapping & updates peers.|
+|   • Abrupt Drop / Power Loss: Inactivity TTL auto-expires user key within 60s.    |
+|   • Thread Expiry: Inactive conversations auto-delete from Redis after 24 hours.  |
+|   • Server Shutdown / Restart: All data purged immediately (Redis in-memory only).|
++-----------------------------------------------------------------------------------+
+```
+
+### Detailed Behavior Summary:
+
+1. **Before Joining (Handshake & Uniqueness)**:
+   - No permanent accounts, passwords, or cookies are stored.
+   - When a user joins, the backend checks Redis to ensure no case-insensitive collision exists (e.g. `Alex` blocks `alex`).
+   - The user presence is registered in Redis with an initial 60-second time-to-live (TTL).
+
+2. **During the Active Session (Real-Time Communication)**:
+   - **Heartbeat Keep-Alive**: The browser client automatically emits a heartbeat every 20 seconds. The server refreshes the 60-second presence key in Redis, maintaining the user in the "Online Users" list.
+   - **Deterministic 1-to-1 Chat Routing**: When Rafi talks to John, the room name is deterministically computed (`chat:John:Rafi` sorted alphabetically). Both users receive messages instantly without broadcasting to unrelated clients.
+   - **1,000 Message FIFO Ring Buffer**: Messages are pushed to Redis lists using `LPUSH` followed immediately by `LTRIM 0 999`. The 1,001st message permanently drops the oldest message.
+   - **Typing & Read Receipt Synchronization**: Debounced socket events inform peers when the other party is typing or actively viewing the message window.
+   - **Spam & Flooding Protection**: Redis sliding window algorithms prevent message spam (max 20 messages per 10s) and rapid nickname churn.
+
+3. **After Leaving / Disconnection (Clean Ephemeral Teardown)**:
+   - **Graceful Tab Close**: The server catches the WebSocket disconnect, deletes the active socket mapping, and broadcasts the updated online user roster to all peers in real-time.
+   - **Network Loss / Crash Recovery**: If a mobile device goes out of Wi-Fi range or loses battery, Redis automatically purges the user's presence record as soon as the 60-second TTL expires.
+   - **24-Hour Conversation Expiration**: If neither participant sends a message in a conversation for 24 hours (`CHAT_TTL_SECONDS=86400`), Redis automatically evicts the entire message list.
+   - **Server Restart / Zero Disk Traces**: Because Redis is configured with `--save ""` and `--appendonly no`, shutting down or restarting the container completely clears all memory, leaving zero residual files on disk.
 
 ---
 
