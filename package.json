@@ -4,9 +4,9 @@
   "private": true,
   "description": "Temporary LAN Real-Time Private Chat with Next.js, Socket.IO, and Redis",
   "scripts": {
-    "dev": "tsx watch server.ts",
-    "build": "next build",
-    "start": "NODE_ENV=production tsx server.ts",
+    "dev": "node api.js && tsx watch server.ts",
+    "build": "node api.js && next build",
+    "start": "node api.js && NODE_ENV=production tsx server.ts",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest"
