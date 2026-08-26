@@ -1,0 +1,50 @@
+services:
+  # Temporary Redis In-Memory Store
+  redis:
+    image: redis:7-alpine
+    container_name: lan-chat-redis
+    # Completely disable disk snapshots & AOF to enforce 100% temporary data
+    command: redis-server --save "" --appendonly no
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - lan-chat-net
+
+  # Next.js + Socket.IO Unified Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lan-chat-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - HOST_LAN_IP=10.10.24.90
+      - MAX_MESSAGES_PER_CHAT=1000
+      - CHAT_TTL_SECONDS=86400
+      - USER_SESSION_TTL_SECONDS=60
+      - HEARTBEAT_INTERVAL_SECONDS=20
+      - MAX_MESSAGE_LENGTH=2000
+      - MAX_NICKNAME_LENGTH=30
+      - MESSAGE_RATE_LIMIT=20
+      - MESSAGE_RATE_WINDOW_SECONDS=10
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - lan-chat-net
+
+networks:
+  lan-chat-net:
+    driver: bridge
